@@ -223,8 +223,17 @@ static voice_t *voice_alloc(track_t *t, uint32_t note)
             return voice_reuse(t, v);
     }
     for (i = 0; i < np; i++) {
-        if (t->v[i].active && t->v[i].note == note)
+        if (t->v[i].active && t->v[i].note == note) {
+#if BOARD_SMK37
+            /* Let a released pipe finish its tail when the same key is struck again. */
+            if (!t->v[i].gate && ENGINES[t->engine] == &ENG_WHEEL && voices_busy() < NVOICE) {
+                uint32_t j;
+                for (j = 0; j < np; j++) if (!t->v[j].active) break;
+                if (j < np) continue;
+            }
+#endif
             return voice_reuse(t, &t->v[i]);
+        }
         nfree += !t->v[i].active;
     }
     if (nfree && voices_busy() >= NVOICE) {

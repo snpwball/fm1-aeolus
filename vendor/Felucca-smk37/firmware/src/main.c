@@ -429,6 +429,7 @@ static void fm1_main(void)
 #if FELUCCA_OTA
             ed_service();                       /* editor replies without waiting for the next frame */
 #endif
+            fm1_delay_us(1000u);                /* pace polling at 1 kHz; emulators can skip timer waits */
         }
     }
 }

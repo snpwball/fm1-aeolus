@@ -1588,17 +1588,41 @@ static void organ_draw_chrome(void)
     static const char *const pages[2]={"BANK 1/2","BANK 2/2"};
     draw_text_box(0, 5, 240, &AF_M, organ_registration_names[organ_preset], T_THEME, 1);
     draw_text_box(0, 22, 240, &AF_S, pages[organ_page & 1u], T_MID, 1);
-    draw_text_box(0, 220, 240, &AF_S, "FADERS: MAN  REV  TIME  PED", T_MID, 1);
+
+}
+/* Name held pitches, not Felucca's optional one-key chord generator. */
+static void organ_played_name(char out[12])
+{
+    static const uint16_t shapes[]={0x091u,0x089u,0x049u,0x111u,0x085u,0x0a1u,0x481u,0x491u,0x489u,0x891u};
+    uint32_t bits=0, lowest=128, count=0;
+    for (uint32_t t=0;t<2;t++) for (uint32_t i=0;i<NVOICE;i++) {
+        const voice_t *v=&trk[t].v[i];
+        if(v->active && v->gate) {bits|=1u<<(v->note%12u); if(v->note<lowest) lowest=v->note;}
+    }
+    if(lowest==128u) {str_cpy(out,"--",12);return;}
+    for(uint32_t i=0;i<12u;i++) if(bits & (1u<<i)) count++;
+    if(count==1u) {note_name(out,lowest);return;}
+    for(uint32_t s=0;s<NELEM(shapes);s++) for(uint32_t k=0;k<12u;k++) {
+        uint32_t root=(lowest+k)%12u;
+        uint32_t mask=((bits>>root)|(bits<<(12u-root)))&0xfffu;
+        if(mask==shapes[s]) {chord_name(out,root,mask);return;}
+    }
+    note_name(out,lowest);
+    str_cpy(out+str_len(out)," +",12u-str_len(out));
 }
 /* value changes repaint one card. A full clear only when the layout itself changes, so a knob or fader
  * does not blank the panel on every step */
 static void organ_draw(void)
 {
     static uint8_t view;
+    static char previous_note[12];
+    char played[12];
     uint8_t next = organ_fader_until ? 2u : 1u;
     int fresh = !view || view != next || ui.force;
     uint32_t i;
-    if (!fresh && !organ_card_dirty && !organ_fader_dirty && !organ_chrome_dirty)
+    organ_played_name(played);
+    uint32_t note_changed=!str_eq(played,previous_note);
+    if (!fresh && !organ_card_dirty && !organ_fader_dirty && !organ_chrome_dirty && (next!=1u || !note_changed))
         return;
     if (fresh) {
         lcd_fill(0, 0, 240, 240, T_BG);
@@ -1615,6 +1639,10 @@ static void organ_draw(void)
     } else {
         if (organ_chrome_dirty)
             organ_draw_chrome();
+        if (fresh || note_changed) {
+            draw_text_box(0, 220, 240, &AF_S, played, T_MID, 1);
+            str_cpy(previous_note,played,sizeof previous_note);
+        }
         for (i = 0; i < 8u; i++)
             if (organ_card_dirty & (1u << i))
                 organ_draw_stop(i);
