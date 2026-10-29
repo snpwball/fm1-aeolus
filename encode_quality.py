@@ -2,15 +2,15 @@
 """Generate compact 8-bit Aeolus ranks at native sample rate (GPL-3.0-or-later)."""
 from pathlib import Path
 import csv, struct, subprocess, re, math
-root=Path(__file__).resolve().parents[1]
-rows=list(csv.DictReader(open(root/'prototype/aeolus49.csv')))
+root=Path(__file__).resolve().parent
+rows=list(csv.DictReader(open(root/'aeolus49.csv')))
 # Each item: index in Aeolus definition, semitone spacing, usable notes from C3.
 selection=[(22,3,36),(23,4,36),(24,3,36),(34,3,36),(27,3,36),(30,3,36),(31,4,36),(3,6,36),(10,6,36),(35,4,36),(36,3,12),(38,3,12)]
-dir=root/'prototype/build/quality';dir.mkdir(parents=True,exist_ok=True)
+dir=root/'build/quality';dir.mkdir(parents=True,exist_ok=True)
 raws=[]
 for index,gap,last in selection:
  name=rows[index]['source']; dst=dir/(name+'.aep')
- p=subprocess.run([str(root/'prototype/build/export'),str(root/'vendor/stops-0.4.0'),name,str(dst)],text=True,capture_output=True,check=True)
+ p=subprocess.run([str(root/'build/export'),str(root/'vendor/stops-0.4.0'),name,str(dst)],text=True,capture_output=True,check=True)
  peak=float(re.search(r'peak ([0-9.]+)',p.stdout).group(1));b=dst.read_bytes();off=8; samples=[]; info=[]
  hdr=(root/'vendor/stops-0.4.0'/name).read_bytes();lo=hdr[28];hi=96 if hdr[29]==46 else hdr[29]
  for n in range(37):

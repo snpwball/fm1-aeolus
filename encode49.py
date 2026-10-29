@@ -4,7 +4,7 @@ from pathlib import Path
 import csv, struct, sys
 import numpy as np
 from scipy.signal import resample_poly
-rows=list(csv.DictReader(open('prototype/aeolus49.csv')))
+rows=list(csv.DictReader(open('aeolus49.csv')))
 out=Path(sys.argv[1]); source=Path(sys.argv[2]); allbytes=bytearray(); meta=[]; names=[]; ranges=[]
 # 4-bit signed companding: more precision near silence, full scale at index 15.
 levels=np.array([-32767,-23000,-15500,-9700,-5400,-2500,-800,0,0,800,2500,5400,9700,15500,23000,32767],dtype=np.int32)

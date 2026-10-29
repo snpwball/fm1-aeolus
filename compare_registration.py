@@ -3,8 +3,8 @@
 from pathlib import Path
 import csv, re, struct
 import numpy as np
-root=Path(__file__).resolve().parents[1]
-rows=list(csv.DictReader(open(root/'prototype/aeolus49.csv')))
+root=Path(__file__).resolve().parent
+rows=list(csv.DictReader(open(root/'aeolus49.csv')))
 selection=[22,23,24,34,27,30,31,3,10,35,36,38]
 header=(root/'vendor/Felucca-smk37/firmware/src/organ_quality.h').read_text()
 peaks=[float(x) for x in re.findall(r'/\* [^\n]+: wave peak ([0-9.]+) \*/',header)]
@@ -27,7 +27,7 @@ def sustained(a,l,step,x):
  return np.array(result[22050:])
 print('stop,aeolus_rms,encoded_rms,residual_db')
 for i,idx in enumerate(selection):
- path=root/'prototype/build/quality'/(rows[idx]['source']+'.aep')
+ path=root/'build/quality'/(rows[idx]['source']+'.aep')
  a,l,step,s=read(path,60); ref=sustained(a,l,step,s)*(peaks[i]/30000)
  # Encoder is 8-bit rounding; scale is restored relative to the largest bank peak.
  q=np.clip(np.rint(s/256),-128,127); enc=sustained(a,l,step,q)*(scales[i]/127)*(max(peaks)/127)
