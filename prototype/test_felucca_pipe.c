@@ -1,0 +1,54 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define NVOICE 8
+#define NPART 2
+#include "felucca_engine.h"
+enum {P_ATK,P_REL,P_E0,P_E1,P_E2,P_E3,P_E4,P_E5,P_E6,P_E7};
+typedef struct track {int16_t p[10]; voice_t v[NVOICE];} track_t;
+static track_t trk[NPART];
+static int32_t voice_amp(int32_t s,const vmod_t *m,uint32_t i) {(void)i;return (s*m->amp1)>>15;}
+static const int16_t SINE[1025]={[256]=32767};
+#include "eng_pipe.c"
+int main(void) {
+ vmod_t m={0};m.amp1=32767;organ_init();
+ for(unsigned stop=0;stop<ORGAN_STOPS;stop++){
+  memset((void*)organ_on,0,sizeof organ_on);organ_on[stop]=1;
+  track_t*t=&trk[stop<10?0:1]; unsigned last=stop<10?84:60;
+  for(unsigned note=48;note<=last;note++) {
+   voice_t*v=&t->v[0];v->note=note;pipe_note_on(t,v);m.pitch16=(int32_t)note*16;int32_t out[32];long long sum=0;
+   for(int k=0;k<1000;k++){memset(out,0,sizeof out);pipe_render(t,v,out,32,&m);for(int i=0;i<32;i++)sum+=out[i]<0?-out[i]:out[i];}
+   if(note>=organ_lo[stop]&&note<=organ_hi[stop]&&!sum){printf("silent stop %u note %u\n",stop,note);return 1;}
+  }
+ }
+ for(unsigned i=0;i<16;i++){unsigned r=organ_slot(i/8,i%8);if((i<12&&r!=i)||(i>=12&&r!=255))return 2;}
+ organ_init(); { voice_t *a=&trk[0].v[0], *b=&trk[0].v[1]; int32_t out[64]={0};
+  a->note=b->note=60;pipe_note_on(&trk[0],a);pipe_note_on(&trk[0],b);
+  m.pitch16=60*16;pipe_render(&trk[0],a,out,64,&m);
+  m.pitch16=60*16+32;pipe_render(&trk[0],b,out,64,&m);
+  if(pipe_voices[0][1].pos[0]<=pipe_voices[0][0].pos[0]) return 5;
+  organ_bend14=8191;pipe_note_on(&trk[0],a);memset(out,0,sizeof out);m.pitch16=60*16;pipe_render(&trk[0],a,out,64,&m);
+  organ_bend14=0;pipe_note_on(&trk[0],b);int32_t flat[64]={0};pipe_render(&trk[0],b,flat,64,&m);
+  if(pipe_voices[0][0].pos[0]<=pipe_voices[0][1].pos[0]) return 7;
+  m.amp1=4000;pipe_note_on(&trk[0],a);memset(out,0,sizeof out);pipe_render(&trk[0],a,out,64,&m);
+  m.amp1=32767;pipe_note_on(&trk[0],b);memset(flat,0,sizeof flat);pipe_render(&trk[0],b,flat,64,&m);
+  long loud=0,soft=0;for(int z=0;z<64;z++){loud+=flat[z]<0?-flat[z]:flat[z];soft+=out[z]<0?-out[z]:out[z];}
+  if(!loud || soft*3>loud) return 8;
+  organ_trem_phase=0x40000000;organ_trem_depth=127;
+  pipe_note_on(&trk[0],a);memset(out,0,sizeof out);m.pitch16=60*16;pipe_render(&trk[0],a,out,64,&m);
+  organ_trem_depth=0;pipe_note_on(&trk[0],b);int32_t plain[64]={0};pipe_render(&trk[0],b,plain,64,&m);
+  long am=0,bm=0;for(int z=0;z<64;z++){am+=out[z]<0?-out[z]:out[z];bm+=plain[z]<0?-plain[z]:plain[z];}
+  if(!am || am>=bm)return 6;
+ }
+ organ_init();organ_apply_preset(5);
+ if(!organ_on[0]||!organ_on[1]||!organ_on[2]||!organ_on[3]||organ_on[9]||organ_gain[2]!=150||organ_gain[3]!=170) return 3;
+ organ_apply_preset(6);if(!organ_on[5]||!organ_on[6]||organ_on[9])return 4;
+ {voice_t *v=&trk[0].v[0]; int32_t out[32]; long long lo=0,hi=0;
+  v->note=36;pipe_note_on(&trk[0],v);m.pitch16=36*16;for(int k=0;k<200;k++){memset(out,0,sizeof out);pipe_render(&trk[0],v,out,32,&m);for(int i=0;i<32;i++)lo+=out[i]<0?-out[i]:out[i];}
+  v->note=96;pipe_note_on(&trk[0],v);m.pitch16=96*16;for(int k=0;k<200;k++){memset(out,0,sizeof out);pipe_render(&trk[0],v,out,32,&m);for(int i=0;i<32;i++)hi+=out[i]<0?-out[i]:out[i];}
+  if(!lo||!hi)return 9;}
+ organ_apply_preset(5);
+ for(int j=0;j<NVOICE;j++){trk[0].v[j].note=60+j;pipe_note_on(&trk[0],&trk[0].v[j]);}
+ for(int k=0;k<1000;k++){int32_t out[32]={0};for(int j=0;j<NVOICE;j++)pipe_render(&trk[0],&trk[0].v[j],out,32,&m);}
+ puts("12 stops, all playable notes, empty slots, and 8-voice plenum passed");return 0;
+}
