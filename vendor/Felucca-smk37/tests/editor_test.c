@@ -1332,7 +1332,10 @@ static int custom_palette(void)
 }
 
 #ifndef EDITOR_TEST_NO_MAIN                              /* (robust_test.c, fuzz_*.c: this file is their base) */
-int main(void)
+#ifndef EDITOR_TEST_MAIN
+#define EDITOR_TEST_MAIN main
+#endif
+int EDITOR_TEST_MAIN(void)
 {
     int bad = preferences() + motion_locks() + framing() + uart_recovery() + steps() + samples() + song_protocol() + malformed_saves() +
               fm6_patches() + user_preset_roundtrip() + live_sync() + usb_burst() + menu_protocol() + drum_kit_retired() +

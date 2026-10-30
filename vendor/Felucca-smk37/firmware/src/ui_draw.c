@@ -1586,7 +1586,7 @@ static void organ_draw_stop(uint32_t i)
 static void organ_draw_chrome(void)
 {
     static const char *const pages[2]={"BANK 1/2","BANK 2/2"};
-    draw_text_box(0, 5, 240, &AF_M, organ_registration_names[organ_preset], T_THEME, 1);
+    draw_text_box(0, 5, 240, &AF_M, organ_bank_ready ? organ_registration_names[organ_preset] : "INSTALL STOP BANK", T_THEME, 1);
     draw_text_box(0, 22, 240, &AF_S, pages[organ_page & 1u], T_MID, 1);
 
 }

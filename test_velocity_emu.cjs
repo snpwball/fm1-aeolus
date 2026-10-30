@@ -3,7 +3,7 @@
 const fs = require('fs');
 const assert = require('assert');
 const wasm = fs.readFileSync('installer/dist/emu/fm1_web.wasm');
-const pkg = fs.readFileSync('vendor/Felucca-smk37/build/felucca-smk37.fwsc');
+const pkg = fs.readFileSync(process.env.ORGAN_TEST_FW || 'vendor/Felucca-smk37/build/felucca-smk37.fwsc');
 async function run(contactUs) {
   let x;
   const env = {fm1_jit_compile(ptr, len) {
@@ -18,6 +18,7 @@ async function run(contactUs) {
   x.fm1_jit(1,16);
   const p=x.fm1_alloc(pkg.length);new Uint8Array(x.memory.buffer,p,pkg.length).set(pkg);
   assert.strictEqual(x.fm1_boot_fwsc(p,pkg.length,0,0,240),0);
+ require('./emu_stop_bank.cjs')(x);
   function render(n) {
     const out=[];
     while(n>0) {

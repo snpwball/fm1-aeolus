@@ -18,6 +18,7 @@ async function run(keys, later=[], presetSteps=0) {
   x.fm1_jit(1,16);
   const p=x.fm1_alloc(pkg.length);new Uint8Array(x.memory.buffer,p,pkg.length).set(pkg);
   assert.strictEqual(x.fm1_boot_fwsc(p,pkg.length,0,0,240),0);
+ require('./emu_stop_bank.cjs')(x);
   function render(n) {
     const out=[];
     while(n>0) {

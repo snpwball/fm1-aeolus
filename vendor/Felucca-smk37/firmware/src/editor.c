@@ -18,7 +18,7 @@ enum { ED_INFO = 1, ED_GET, ED_SET, ED_DUMP, ED_DESC, ED_STEP_GET, ED_STEP_SET, 
        ED_TRACK, ED_TRACK_MIX, ED_TRACK_DUMP, ED_TRACK_STEP,                    /* v3: tracks */
        ED_TRACK_PARAM, ED_TRACK_CHANGED, ED_SONG,
        ED_UI_STATE, ED_UI_SET, ED_UI_PALETTES, ED_FAV_GET, ED_FAV_SET,
-       ED_MOTION = 64, ED_BACKUP_LIST, ED_BACKUP_GET, ED_BACKUP_PUT };                              /* v6: song chain */
+       ED_MOTION = 64, ED_BACKUP_LIST, ED_BACKUP_GET, ED_BACKUP_PUT, ED_ORGAN_BANK = 82 };                              /* v6: song chain */
 
 static uint8_t ed_out[664] __attribute__((section(".pool")));   /* (MOTION op 8: 128 records and their kinds, 653 bytes) */
 static uint32_t ed_n;
@@ -92,6 +92,8 @@ static int ed_smp_erase(uint32_t k, uint32_t all)  /* header sector, or the whol
         return -8;                                 /* SMK: USR3 has no flash */
     st_stock_release();                            /* before the first erase in USRFLASH: storage.c */
 #endif
+    organ_bank_ready = 0;
+    ui.force = 1;
     usr_nz[k] = 0;
     for (i = 0; i < 16u; i++)
         usr_zone[k][i].n = 0;                     /* a sounding voice ends instead of reading 0xFF */
@@ -116,6 +118,8 @@ static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
     if (h->magic != SMP_USER_MAGIC || h->version != 1 || !h->nz || h->nz > 16u ||
         h->data_len > SMP_USER_SIZE - SMP_USER_DATA)
         return 2;
+    if (h->data_len != organ_bank_length[k] || h->crc != organ_bank_crc[k] ||
+        h->rsv2[0] != 0x4F524731u || h->rsv2[1] != k) return 2;
     if (usr_nz[k])                                     /* published zones may still be read by live voices */
         return memcmp(h, smp_user_xip(k), sizeof *h) ? 2 : 0;
     if (ed_flash_stop())                               /* (only a header that will be written stops the transport) */
@@ -127,6 +131,8 @@ static int ed_smp_end(uint32_t k, const uint8_t *a, uint32_t na)
         return 4;
     ed_smp_inval(k);
     smp_user_scan(k);
+    organ_bank_check();
+    ui.force = 1;
     return usr_nz[k] ? 0 : 5;
 }
 
@@ -396,7 +402,7 @@ static void ed_motion_reply(uint32_t k, uint32_t rc, uint32_t kinds, uint32_t fu
 static int ed_args_ok(uint32_t cmd, const uint8_t *a, uint32_t n)
 {
     switch (cmd) {
-    case ED_INFO: case ED_DUMP: case ED_SMP_INFO: case ED_PING:
+    case ED_INFO: case ED_DUMP: case ED_SMP_INFO: case ED_PING: case ED_ORGAN_BANK:
     case ED_UI_STATE: case ED_UI_PALETTES: case ED_LEARN_GET: case ED_PALETTE_GET:
         return !n;
     case ED_GET: case ED_DESC: case ED_PRESET: case ED_PROJECT: case ED_UP_LIST:
@@ -652,6 +658,15 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
             return;
         ed_b(a[0]);
         ed_b((uint32_t)ed_smp_end(a[0], a + 1, na - 1u));
+        break;
+    case ED_ORGAN_BANK:
+        organ_bank_check();
+        ed_b(1); ed_b(organ_bank_ready); ed_b(organ_bank_valid);
+        for(i=0;i<2u;i++) {
+            for(uint32_t j=0;j<5u;j++) ed_b(organ_bank_crc[i]>>(7u*j));
+            for(uint32_t j=0;j<3u;j++) ed_b(organ_bank_length[i]>>(7u*j));
+        }
+        ed_str(organ_build_id,16);
         break;
     case ED_SMP_INFO:                                      /* -> per slot: zones (0 = empty), name, data KiB */
         ed_b(SMP_USER_SLOTS);

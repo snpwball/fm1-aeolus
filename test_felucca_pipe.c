@@ -18,32 +18,19 @@ int main(void) {
  if(organ_velocity(127)!=127 || organ_velocity(64)>=64 || organ_velocity(1)<16) return 16;
  for(unsigned v=1;v<127;v++)if(organ_velocity(v)>organ_velocity(v+1))return 17;
 
- /* Compare both decoders for every packed block, including the four newer stops. */
- for(unsigned stop=0;stop<ORGAN_STOPS;stop++) {
-  if((ORGAN_RAW_MASK>>stop)&1u)continue;
-  const uint8_t *src=organ_waves[stop];
-  pipe_voice_t *p=&pipe_voices[0][0];
-  const organ_info *last=&organ_metas[stop][(organ_last[stop]+organ_gaps[stop]/2)/organ_gaps[stop]];
-  uint32_t total=last->offset+last->attack+last->loop;
-  for(unsigned k=0;k<2;k++)p->cache[stop][k].block=UINT32_MAX;
-  for(uint32_t block=0;block<(total+15u)/16u;block++) {
-   uint32_t off=organ_checks[stop][block>>3];
-   for(uint32_t n=0;n<(block&7u);n++)off+=2u+2u*src[off+1u];
-   int32_t base=(int8_t)src[off];uint32_t bits=src[off+1],acc=0,have=0;off+=2;
-   for(uint32_t i=0;i<16u && block*16u+i<total;i++) {
-    while(have<bits){acc|=(uint32_t)src[off++]<<have;have+=8u;}
-    int32_t expected=base+(int32_t)(bits?acc&((1u<<bits)-1u):0u);
-    if(organ_sample(p,stop,block*16u+i)!=expected){printf("decode mismatch stop %u block %u sample %u\n",stop,block,i);return 28;}
-    acc>>=bits;have-=bits;
-   }
-  }
+ for(unsigned slot=0;slot<2;slot++) {
+  char name[64];snprintf(name,sizeof name,"build/organ-bank-%u.bin",slot);
+  FILE *f=fopen(name,"rb");if(!f)return 28;
+  size_t n=fread(organ_bank_image[slot],1,sizeof organ_bank_image[slot],f);fclose(f);
+  if(n!=sizeof organ_bank_image[slot])return 29;
  }
+ organ_bank_check();if(!organ_bank_ready)return 30;
+ organ_bank_image[0][512]^=1;organ_bank_check();if(organ_bank_ready)return 31;
+ organ_bank_image[0][512]^=1;organ_bank_check();if(!organ_bank_ready)return 32;
  for(unsigned stop=0;stop<ORGAN_STOPS;stop++) {
-  pipe_voice_t *p=&pipe_voices[0][0];
-  for(unsigned k=0;k<2;k++)p->cache[stop][k].block=UINT32_MAX;
-  for(size_t i=0;i<baseline_len(stop);i++)if(organ_sample(p,stop,(uint32_t)i)!=baseline_sample(stop,i)){printf("decode mismatch stop %u sample %zu\n",stop,i);return 10;}
+  const int8_t *wave=organ_wave(stop);
+  for(size_t i=0;i<baseline_len(stop);i++)if(wave[i]!=baseline_sample(stop,i)){printf("wave mismatch stop %u sample %zu\n",stop,i);return 10;}
  }
-
  for(unsigned stop=0;stop<ORGAN_STOPS;stop++){
   memset((void*)organ_on,0,sizeof organ_on);organ_on[stop]=1;
   track_t*t=&trk[(stop==10||stop==11)?1:0]; unsigned last=(stop==10||stop==11)?60:84;

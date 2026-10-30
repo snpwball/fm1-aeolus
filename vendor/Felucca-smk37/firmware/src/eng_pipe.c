@@ -35,35 +35,38 @@ static void organ_init(void) {
     for(uint32_t i=0;i<ORGAN_STOPS;i++){organ_gain[i]=100u;organ_on[i]=0;}
     organ_on[10]=1; organ_page=0; organ_apply_preset(0);
 }
-typedef struct { uint32_t block; int8_t data[16]; } organ_cache_t;
-typedef struct { uint32_t pos[ORGAN_STOPS]; uint16_t fade[ORGAN_STOPS]; organ_cache_t cache[ORGAN_STOPS][2]; uint8_t valid, touch; } pipe_voice_t;
-/* Independent 16-sample blocks; every eighth block has a direct checkpoint. */
-/* A cache hit must be a load, without saving registers for the decoder. */
-static __attribute__((noinline)) void organ_decode(organ_cache_t *c, unsigned stop, uint32_t block) {
-    const uint8_t *src=organ_waves[stop]; uint32_t off=organ_checks[stop][block>>3];
-    for(uint32_t n=0;n<(block&7u);n++) off+=2u+2u*src[off+1u];
-    int32_t base=(int8_t)src[off]; uint32_t bits=src[off+1u]; off+=2;
-    uint32_t mask=(1u<<bits)-1u;
-    for(unsigned group=0;group<4u;group++) {
-        uint32_t bit=group*4u*bits, shift=bit&7u, count=(shift+4u*bits+7u)>>3;
-        const uint8_t *s=src+off+(bit>>3);
-        uint32_t acc=count?s[0]:0u;
-        if(count>1u) acc|=(uint32_t)s[1]<<8;
-        if(count>2u) acc|=(uint32_t)s[2]<<16;
-        if(count>3u) acc|=(uint32_t)s[3]<<24;
-        acc>>=shift;
-        for(unsigned n=0;n<4u;n++) {
-            c->data[group*4u+n]=(int8_t)(base+(int32_t)(acc&mask));
-            acc>>=bits;
-        }
-    }
-    c->block=block;
+typedef struct { uint32_t pos[ORGAN_STOPS]; uint16_t fade[ORGAN_STOPS]; uint8_t valid, touch; } pipe_voice_t;
+#ifndef ORGAN_BANK_PTR
+#ifdef ORGAN_HOST
+static uint8_t organ_bank_image[2][0x14000];
+#define ORGAN_BANK_PTR(k) (organ_bank_image[k])
+#else
+#define ORGAN_BANK_PTR(k) fm1_xip_ptr(0xC2000u+(k)*0x14000u)
+#endif
+#endif
+static uint8_t organ_bank_ready, organ_bank_valid;
+static uint32_t organ_le32(const uint8_t *p) {
+    return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
 }
-static __attribute__((always_inline)) inline int32_t organ_sample(pipe_voice_t *p, unsigned stop, uint32_t index) {
-    if((ORGAN_RAW_MASK>>stop)&1u) return (int8_t)organ_waves[stop][index];
-    uint32_t block=index>>4; organ_cache_t *c=&p->cache[stop][block&1u];
-    if(c->block!=block) organ_decode(c,stop,block);
-    return c->data[index&15u];
+static void organ_bank_check(void) {
+    organ_bank_ready=0; organ_bank_valid=0;
+    for(uint32_t k=0;k<2u;k++) {
+        const uint8_t *b=ORGAN_BANK_PTR(k);
+        if(organ_le32(b)!=0x504D5346u || b[4]!=1u || b[5] || b[6]!=1u ||
+           organ_le32(b+16)!=organ_bank_length[k] || organ_le32(b+20)!=organ_bank_crc[k] ||
+           organ_le32(b+24)!=0x4F524731u || organ_le32(b+28)!=k) continue;
+        uint32_t crc=0xffffffffu;
+        for(uint32_t i=0;i<organ_bank_length[k];i++) {
+            crc^=b[512u+i];
+            for(unsigned j=0;j<8u;j++) crc=(crc>>1)^((0u-(crc&1u))&0xedb88320u);
+        }
+        if((crc^0xffffffffu)==organ_bank_crc[k]) organ_bank_valid|=(uint8_t)(1u<<k);
+    }
+    organ_bank_ready=organ_bank_valid==3u;
+}
+static const int8_t *organ_wave(unsigned stop) {
+    uint32_t k=organ_bank_slot[stop];
+    return (const int8_t *)(k<2u ? ORGAN_BANK_PTR(k)+512u+organ_bank_offset[stop] : organ_waves[stop]);
 }
 #ifdef ORGAN_HOST
 static pipe_voice_t pipe_voices[NPART][NVOICE];
@@ -81,7 +84,7 @@ static void pipe_note_on(track_t *t, voice_t *v) {
     pipe_voice_t *p=&pipe_voices[(uint32_t)(t-trk)%NPART][(uint32_t)(v-t->v)%NVOICE];
     organ_touch_t *q=&organ_touch[(uint32_t)(t-trk)%NPART][(uint32_t)(v-t->v)%NVOICE];
     p->touch=v->vel; v->vel=organ_velocity(v->vel);
-    for(unsigned j=0;j<ORGAN_STOPS;j++) {p->pos[j]=0; q->age[j]=0; q->low[j]=0; p->fade[j]=organ_on[j]?256u:0u; p->cache[j][0].block=UINT32_MAX; p->cache[j][1].block=UINT32_MAX;}
+    for(unsigned j=0;j<ORGAN_STOPS;j++) {p->pos[j]=0; q->age[j]=0; q->low[j]=0; p->fade[j]=organ_on[j]?256u:0u;}
     p->valid=t==&trk[1] ? (v->note>=48 && v->note<=60) : v->note<=127;
 }
 /* 2^(semitones/12), Q16, for -36..36. Octave buttons reach ±3 octaves past the stored pipes. */
@@ -92,7 +95,7 @@ static uint32_t organ_semi(int32_t s) {
 }
 static void pipe_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m) {
     pipe_voice_t *p=&pipe_voices[(uint32_t)(t-trk)%NPART][(uint32_t)(v-t->v)%NVOICE];
-    if(!p->valid) return;
+    if(!p->valid || !organ_bank_ready) return;
     organ_touch_t *q=&organ_touch[(uint32_t)(t-trk)%NPART][(uint32_t)(v-t->v)%NVOICE];
     static const uint32_t pitch_factor[65]={58386,58597,58809,59022,59235,59449,59664,59880,60097,60314,60532,60751,60971,61191,61413,61635,61858,62081,62306,62531,62757,62984,63212,63441,63670,63901,64132,64364,64596,64830,65065,65300,65536,65773,66011,66250,66489,66730,66971,67213,67456,67700,67945,68191,68438,68685,68933,69183,69433,69684,69936,70189,70443,70698,70953,71210,71468,71726,71985,72246,72507,72769,73032,73297,73562};
     int32_t bend=m->pitch16-(int32_t)v->note*16+(int32_t)organ_bend14*32/8192;
@@ -115,6 +118,7 @@ static void pipe_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         int32_t delta=rel-idx*gap;
         uint32_t rate=((organ_semi(delta)>>4)*bend_factor)>>12;
         const organ_info *a=&organ_metas[j][idx];
+        const int8_t *wave=organ_wave(j)+a->offset;
         uint32_t age=q->age[j]; int32_t low=q->low[j];
         uint32_t onset=64u+(127u-(uint32_t)p->touch)*8u, onset_step=65536u/onset;
         uint32_t pos=p->pos[j], attack=(uint32_t)a->attack<<16, lim=a->attack+a->loop;
@@ -123,22 +127,28 @@ static void pipe_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
             uint32_t s=pos>>16, next;
             if(s>=lim) s=a->attack;
             next=s+1u; if(next>=lim) next=a->attack;
-            int32_t x=organ_sample(p,j,a->offset+s)*32, y=organ_sample(p,j,a->offset+next)*32;
+            int32_t x=(int32_t)wave[s]*32, y=(int32_t)wave[next]*32;
             /* Trumpet loops do not close. Blend the last 32 samples into the start so the seam is not a click. */
             if(j==9u && s>=a->attack && a->loop>32u) {
                 uint32_t lp=s-a->attack;
                 if(lp+32u>=a->loop) {
                     uint32_t k=a->loop-lp, hs=a->attack+32u-k, hn=hs+1u<lim?hs+1u:a->attack;
-                    x=(x*(int32_t)k+organ_sample(p,j,a->offset+hs)*32*(int32_t)(32u-k))/32;
-                    y=(y*(int32_t)k+organ_sample(p,j,a->offset+hn)*32*(int32_t)(32u-k))/32;
+                    x=(x*(int32_t)k+(int32_t)wave[hs]*32*(int32_t)(32u-k))/32;
+                    y=(y*(int32_t)k+(int32_t)wave[hn]*32*(int32_t)(32u-k))/32;
                 }
             }
             int32_t sample=x+((((y-x)/2)*(int32_t)((pos&65535u)>>1))>>14);
             if(age<8192u) {
                 low+=(sample-low)/8;
                 /* Shape the pipe attack, returning to its original tone after 186 ms. */
-                int32_t color=((int32_t)p->touch-64)*(int32_t)(8192u-age)/8192;
+                int32_t strength=(int32_t)p->touch-64;
+                if(p->touch>96u) strength+=((int32_t)p->touch-96)*2;
+                int32_t color=strength*(int32_t)(8192u-age)/8192;
                 sample+=(sample-low)*color/128;
+                if(p->touch>96u) {
+                    uint32_t boost=((uint32_t)p->touch-96u)*(8192u-age)/8192u;
+                    sample+=sample*(int32_t)boost/100;
+                }
                 if(age<onset) sample=(sample*(int32_t)(age*onset_step))/65536;
                 age++;
             }

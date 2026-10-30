@@ -278,6 +278,7 @@ static void fm1_main(void)
     panel_init();
     felucca_init();
     organ_init();
+    organ_bank_check();
     master_boot();
     kb_boot_hold = 1;                         /* #137: no notes from the keys before the UI (seq.c keyboard_block) */
 #if FELUCCA_CPU2
